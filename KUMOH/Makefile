@@ -10,12 +10,13 @@
 
 CC = gcc
 
-TARGETS = nvmedia_capture
+TARGETS = captureOpenCV
 
-CFLAGS   = -Wall -I. -I./utils
+OPT = -Os -O2
+CFLAGS   = $(OPT) -Wall -I. -I./utils `pkg-config opencv --cflags`
 CPPFLAGS = -I./include
 
-OBJS := nvmedia_capture.o
+OBJS := captureOpenCV.o
 OBJS += nvthread.o
 
 LDLIBS :=
@@ -25,6 +26,7 @@ LDLIBS += -lnvtestutil_board
 LDLIBS += -lnvtestutil_capture_input
 LDLIBS += -lnvtestutil_i2c
 LDLIBS += -lpthread
+LDLIBS += `pkg-config opencv --libs`
 
 default : $(TARGETS)
 

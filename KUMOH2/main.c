@@ -4,16 +4,21 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/time.h>
-#include <unistd.h>
+
 #include <nvcommon.h>
 #include <nvmedia.h>
-#include <ResTable_720To320.h>
+
 #include <testutil_board.h>
 #include <testutil_capture_input.h>
+
+#include "nvthread.h"
+#include "car_lib.h"
+
 #include <highgui.h>
 #include <cv.h>
-#include "nvthread.h"
-// #include "car_lib.h"
+#include <ResTable_720To320.h>
+#include <pthread.h>
+#include <unistd.h>
 
 //MACRO
 #define VIP_BUFFER_SIZE 6

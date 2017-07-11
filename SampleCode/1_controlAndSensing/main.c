@@ -28,8 +28,7 @@ void main(void)
     CarControlInit();
 
 #ifdef LIGHT_BEEP
-    //0. light and beep Control ------------------------------------------------
---
+    //0. light and beep Control --------------------------------------------------
     printf("\n\n 0. light and beep control\n");
     CarLight_Write(ALL_ON);
     usleep(1000000);
@@ -49,7 +48,7 @@ void main(void)
     Alarm_Write(ON);
     usleep(100000);
     Alarm_Write(OFF);
-
+    
     Winker_Write(ALL_ON);
     usleep(1000000);
     Winker_Write(ALL_OFF);
@@ -62,14 +61,12 @@ void main(void)
 #endif
 
 #ifdef POSITION_CONTROL
-     // 1. position control ----------------------------------------------------
----
+     // 1. position control -------------------------------------------------------
     printf("\n\n 1. position control\n");
 
     //jobs to be done beforehand;
     SpeedControlOnOff_Write(CONTROL);   // speed controller must be also ON !!!
-    speed = 50; // speed set     --> speed must be set when using position contr
-oller
+    speed = 50; // speed set     --> speed must be set when using position controller
     DesireSpeed_Write(speed);
 
     //control on/off
@@ -78,16 +75,15 @@ oller
     PositionControlOnOff_Write(CONTROL);
 
     //position controller gain set
-    gain = PositionProportionPoint_Read();    // default value = 10, range : 1~5
-0
+    gain = PositionProportionPoint_Read();    // default value = 10, range : 1~50
     printf("PositionProportionPoint_Read() = %d\n", gain);
     gain = 20;
     PositionProportionPoint_Write(gain);
-
+            
     //position write
     position_now = 0;  //initialize
     EncoderCounter_Write(position_now);
-
+    
     //position set
     position=DesireEncoderCount_Read();
     printf("DesireEncoderCount_Read() = %d\n", position);
@@ -96,7 +92,7 @@ oller
 
     position=DesireEncoderCount_Read();
     printf("DesireEncoderCount_Read() = %d\n", position);
-
+    
     tol = 10;    // tolerance
     while(abs(position_now-position)>tol)
     {
@@ -105,15 +101,13 @@ oller
     }
     sleep(1);
 #endif
-
+  
 #ifdef SPEED_CONTROL
-    // 2. speed control --------------------------------------------------------
---
+    // 2. speed control ----------------------------------------------------------
     printf("\n\n 2. speed control\n");
 
     //jobs to be done beforehand;
-    PositionControlOnOff_Write(UNCONTROL); // position controller must be OFF !!
-!
+    PositionControlOnOff_Write(UNCONTROL); // position controller must be OFF !!!
 
     //control on/off
     status=SpeedControlOnOff_Read();
@@ -122,8 +116,7 @@ oller
 
     //speed controller gain set
     //P-gain
-    gain = SpeedPIDProportional_Read();        // default value = 10, range : 1~
-50
+    gain = SpeedPIDProportional_Read();        // default value = 10, range : 1~50
     printf("SpeedPIDProportional_Read() = %d \n", gain);
     gain = 20;
     SpeedPIDProportional_Write(gain);
@@ -133,10 +126,9 @@ oller
     printf("SpeedPIDIntegral_Read() = %d \n", gain);
     gain = 20;
     SpeedPIDIntegral_Write(gain);
-
+    
     //D-gain
-    gain = SpeedPIDDifferential_Read();        // default value = 10, range : 1~
-50
+    gain = SpeedPIDDifferential_Read();        // default value = 10, range : 1~50
     printf("SpeedPIDDefferential_Read() = %d \n", gain);
     gain = 20;
     SpeedPIDDifferential_Write(gain);
@@ -146,7 +138,7 @@ oller
     printf("DesireSpeed_Read() = %d \n", speed);
     speed = -10;
     DesireSpeed_Write(speed);
-
+ 
     sleep(2);  //run time 
 
     speed = DesireSpeed_Read();
@@ -158,43 +150,38 @@ oller
 #endif
 
 #ifdef SERVO_CONTROL
-    // 3. servo control --------------------------------------------------------
---
+    // 3. servo control ----------------------------------------------------------
     printf("\n\n 3. servo control\n");
     //steer servo set
     angle = SteeringServoControl_Read();
-    printf("SteeringServoControl_Read() = %d\n", angle);    //default = 1500, 0x
-5dc
+    printf("SteeringServoControl_Read() = %d\n", angle);    //default = 1500, 0x5dc
 
     angle = 1200;
     SteeringServoControl_Write(angle);
 
     //camera x servo set
     angle = CameraXServoControl_Read();
-    printf("CameraXServoControl_Read() = %d\n", angle);    //default = 1500, 0x5
-dc
+    printf("CameraXServoControl_Read() = %d\n", angle);    //default = 1500, 0x5dc
 
     angle = 1400;
     CameraXServoControl_Write(angle);
 
     //camera y servo set
     angle = CameraYServoControl_Read();
-    printf("CameraYServoControl_Read() = %d\n", angle);    //default = 1500, 0x5
-dc
+    printf("CameraYServoControl_Read() = %d\n", angle);    //default = 1500, 0x5dc
 
     angle = 1400;
-    CameraYServoControl_Write(angle);
-
+    CameraYServoControl_Write(angle);    
+    
     sleep(1);
     angle = 1500;
     SteeringServoControl_Write(angle);
     CameraXServoControl_Write(angle);
-    CameraYServoControl_Write(angle);
-#endif
+    CameraYServoControl_Write(angle); 
+#endif  
 
 #ifdef LINE_TRACE
-    // 4. line trace sensor ----------------------------------------------------
-----
+    // 4. line trace sensor --------------------------------------------------------
     sensor = LineSensor_Read();        // black:1, white:0
     printf("LineSensor_Read() = ");
     for(i=0; i<8; i++)
@@ -209,8 +196,7 @@ dc
 #endif
 
 #ifdef DISTANCE_SENSOR
-    // 5. distance sensor ------------------------------------------------------
---
+    // 5. distance sensor --------------------------------------------------------
     printf("\n\n 4. distance sensor\n");
     for(i=0; i<1000; i++)
     {
@@ -219,10 +205,12 @@ dc
         for(j=0; j<50; j++)
         {
             data = DistanceSensor(channel);
-            printf("channel = %d, distance = 0x%04X(%d) \n", channel, data, data
-);
+            printf("channel = %d, distance = 0x%04X(%d) \n", channel, data, data);
             usleep(100000);
         }
     }
 #endif
 }
+
+
+
