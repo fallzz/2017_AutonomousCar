@@ -30,7 +30,7 @@
 #define RESIZE_WIDTH  320
 #define RESIZE_HEIGHT 240
 
-#define DRVIE 0
+#define DRIVE 0
 #define STOP_FRONT_SENSOR 1
 
 //OVERALL VARIABLES
@@ -718,7 +718,7 @@ static int Frame2Ipl(IplImage* img){
     return 1;
 }
 
-static unsigned int CaptureThread(void *params)
+static unsigned int CaptureThread(void *params){
     int i = 0;
     NvU64 stime, ctime;
     NvMediaTime t1 = {0}, t2 = {0}, st = {0}, ct = {0};
@@ -934,8 +934,8 @@ void *ControlThread(void *unused){
         // cvCanny(imgOrigin, imgCanny, 100, 100, 3);
         // sprintf(fileName, "captureImage/imgCanny%d.png", i);
         // cvSaveImage(fileName , imgCanny, 0);
-        //sprintf(fileName, "captureImage/imgOrigin%d.png", i);
-        //cvSaveImage(fileName, imgOrigin, 0);
+        sprintf(fileName, "captureImage/imgOrigin%d.png", i);
+        cvSaveImage(fileName, imgOrigin, 0);
 
 
         // TODO : control steering angle based on captured image ---------------
