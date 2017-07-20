@@ -4,16 +4,22 @@
 #include <string.h>
 #include <signal.h>
 #include <sys/time.h>
-#include <unistd.h>
+
 #include <nvcommon.h>
 #include <nvmedia.h>
-#include <ResTable_720To320.h>
+
 #include <testutil_board.h>
 #include <testutil_capture_input.h>
+
+#include "nvthread.h"
+#include "car_lib.h"
+
 #include <highgui.h>
 #include <cv.h>
-#include "nvthread.h"
-// #include "car_lib.h"
+#include <ResTable_720To320.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <math.h>
 
 //MACRO
 #define VIP_BUFFER_SIZE 6
@@ -24,7 +30,11 @@
 #define RESIZE_WIDTH  320
 #define RESIZE_HEIGHT 240
 
+#define DRVIE 0
+#define STOP_FRONT_SENSOR 1
+
 //OVERALL VARIABLES
+static char drive_status;
 static NvMediaVideoSurface *capSurf = NULL;
 static NvBool stop = NVMEDIA_FALSE;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
@@ -43,7 +53,7 @@ typedef struct {
     NvMediaVideoOutputDevice vipOutputDevice[2];
     NvBool vipFileDumpEnabled;
     char * vipOutputFileName;
-    unsigned int vipCaptureTime, ipCaptureCount;
+    unsigned int vipCaptureTime, vipCaptureCount;
 } TestArgs;
 
 typedef struct {
@@ -61,9 +71,22 @@ typedef struct {
     NvBool displayEnabled, fileDumpEnabled, timeNotCount;
 } CaptureContext;
 
-//Function(made by HyunSeok)
-// void start_setting(int velocity);
-// void sensor_Obstacle_Detection(char sensor_number, int value, int velocity);
+//Basic Driving Function(made by HyunSeok)
+static void start_setting(int velocity);
+static void sensor_Obstacle_Detection(char sensor_number, int value, int velocity);
+
+//TODO : Bird-Eye-View
+static void Bird_Eye_View(IplImage* imgBird, IplImage* imgOrigin);
+
+//TODO : RANSAC ALGORITHM, HOUGHLINE ALGORITHM
+
+//TODO : Parking ALGORITHM
+
+//TODO : STOP SIGN DETECT ALGORITHM
+
+//TODO : OVERTAKE ALGORITHM
+
+//TODO : TRAFFIC LIGHT ALGORITHM
 
 //Function(from captureOpenCV.c)
 static void SignalHandler(int signal);
@@ -77,8 +100,7 @@ static unsigned int CaptureThread(void *params);
 static void CheckDisplayDevice(NvMediaVideoOutputDevice deviceType, NvMediaBool *enabled, unsigned int *displayId);
 void *ControlThread(void *unused);
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]){
     int err = -1;
     TestArgs testArgs;
 
@@ -105,7 +127,7 @@ int main(int argc, char *argv[])
     memset(&testArgs, 0, sizeof(TestArgs));
     if(!ParseOptions(argc, argv, &testArgs))
         return -1;
-
+    start_setting(150);
     printf("1. Create NvMedia capture \n");
     // Create NvMedia capture(s)
     switch (testArgs.vipDeviceInUse)
@@ -303,6 +325,8 @@ fail: // Run down sequence
         NvSemaphoreDestroy(vipStartSem);
 
     printf("10. Close output file(s) \n");
+    DesireSpeed_Write(0);
+    CameraYServoControl_Write(1500);
     // Close output file(s)
     if(vipFile)
         fclose(vipFile);
@@ -330,7 +354,6 @@ fail: // Run down sequence
     if(vipCapture)
     {
         NvMediaVideoCaptureDestroy(vipCapture);
-
         // Reset VIP settings of the board
         switch (testArgs.vipDeviceInUse)
         {
@@ -347,49 +370,64 @@ fail: // Run down sequence
     return err;
 }
 
+static void start_setting(int velocity){
+  CarControlInit();
+  SpeedControlOnOff_Write(CONTROL);
+  DesireSpeed_Write(velocity);
+  PositionControlOnOff_Write(CONTROL);
+  drive_status = DRIVE;
+  EncoderCounter_Write(0);
+  DesireEncoderCount_Write(300);
+  PositionControlOnOff_Write(UNCONTROL);
+  CameraYServoControl_Write(1700); 
+}
 
-static void SignalHandler(int signal)
-{
+void sensor_Obstacle_Detection(char sensor_number, int threshold, int velocity){
+    int data = DistanceSensor(sensor_number);
+    if(data > threshold && drive_status==DRIVE){
+        DesireSpeed_Write(0);
+        drive_status = STOP_FRONT_SENSOR;
+    }
+    else if(data < threshold && drive_status==STOP_FRONT_SENSOR){
+        DesireSpeed_Write(velocity);
+        drive_status = DRIVE;
+    }
+}
+
+static void Bird_Eye_View(IplImage* imgBird, IplImage* imgOrigin){
+    
+}
+
+
+static void SignalHandler(int signal){
     stop = NVMEDIA_TRUE;
     MESSAGE_PRINTF("%d signal received\n", signal);
 }
 
-static void GetTime(NvMediaTime *time)
-{
+static void GetTime(NvMediaTime *time){
     struct timeval t;
-
     gettimeofday(&t, NULL);
-
     time->tv_sec = t.tv_sec;
     time->tv_nsec = t.tv_usec * 1000;
 }
 
-static void AddTime(NvMediaTime *time, NvU64 uSec, NvMediaTime *res)
-{
+static void AddTime(NvMediaTime *time, NvU64 uSec, NvMediaTime *res){
     NvU64 t, newTime;
-
     t = (NvU64)time->tv_sec * 1000000000LL + (NvU64)time->tv_nsec;
     newTime = t + uSec * 1000LL;
     res->tv_sec = newTime / 1000000000LL;
     res->tv_nsec = newTime % 1000000000LL;
 }
 
-//static NvS64 SubTime(NvMediaTime *time1, NvMediaTime *time2)
-static NvBool SubTime(NvMediaTime *time1, NvMediaTime *time2)
-{
+static NvBool SubTime(NvMediaTime *time1, NvMediaTime *time2){
     NvS64 t1, t2, delta;
-
     t1 = (NvS64)time1->tv_sec * 1000000000LL + (NvS64)time1->tv_nsec;
     t2 = (NvS64)time2->tv_sec * 1000000000LL + (NvS64)time2->tv_nsec;
     delta = t1 - t2;
-
-//    return delta / 1000LL;
     return delta > 0LL;
 }
 
-
-static void DisplayUsage(void)
-{
+static void DisplayUsage(void){
     printf("Usage : nvmedia_capture [options]\n");
     printf("Brief: Displays this help if no arguments are given. Engages the respective capture module whenever a single \'c\' or \'v\' argument is supplied using default values for the missing parameters.\n");
     printf("Options:\n");
@@ -400,8 +438,7 @@ static void DisplayUsage(void)
     printf("-vn [frames]          # VIP frames to be captured (default = 300); default = on if -vt is not used\n");
 }
 
-static int ParseOptions(int argc, char *argv[], TestArgs *args)
-{
+static int ParseOptions(int argc, char *argv[], TestArgs *args){
     int i = 1;
 
     // Set defaults if necessary - TBD
@@ -538,8 +575,7 @@ static int ParseOptions(int argc, char *argv[], TestArgs *args)
     return 1;
 }
 
-static int DumpFrame(FILE *fout, NvMediaVideoSurface *surf)
-{
+static int DumpFrame(FILE *fout, NvMediaVideoSurface *surf){
     NvMediaVideoSurfaceMap surfMap;
     unsigned int width, height;
 
@@ -585,8 +621,7 @@ static int DumpFrame(FILE *fout, NvMediaVideoSurface *surf)
     return 1;
 }
 
-static int Frame2Ipl(IplImage* img)
-{
+static int Frame2Ipl(IplImage* img){
     NvMediaVideoSurfaceMap surfMap;
     unsigned int resWidth, resHeight;
     int r,g,b;
@@ -684,7 +719,6 @@ static int Frame2Ipl(IplImage* img)
 }
 
 static unsigned int CaptureThread(void *params)
-{
     int i = 0;
     NvU64 stime, ctime;
     NvMediaTime t1 = {0}, t2 = {0}, st = {0}, ct = {0};
@@ -801,7 +835,7 @@ static unsigned int CaptureThread(void *params)
     } // while end
 
     // Release any left-over frames
-//    if(ctx->displayEnabled && capSurf && capSurf->type != NvMediaSurfaceType_YV16x2) // To allow returning frames after breaking out of the while loop in case of error
+
     if(ctx->displayEnabled && capSurf)
     {
         NvMediaVideoMixerRender(ctx->mixer, // mixer
@@ -829,8 +863,7 @@ static unsigned int CaptureThread(void *params)
     return 0;
 }
 
-static void CheckDisplayDevice(NvMediaVideoOutputDevice deviceType, NvMediaBool *enabled, unsigned int *displayId)
-{
+static void CheckDisplayDevice(NvMediaVideoOutputDevice deviceType, NvMediaBool *enabled, unsigned int *displayId){
     int outputDevices;
     NvMediaVideoOutputDeviceParams *outputParams;
     int i;
@@ -870,8 +903,7 @@ static void CheckDisplayDevice(NvMediaVideoOutputDevice deviceType, NvMediaBool 
     free(outputParams);
 }
 
-void *ControlThread(void *unused)
-{
+void *ControlThread(void *unused){
     int i=0;
     char fileName[30];
     NvMediaTime pt1 ={0}, pt2 = {0};
@@ -879,11 +911,12 @@ void *ControlThread(void *unused)
     struct timespec;
 
     IplImage* imgOrigin;
-    IplImage* imgCanny;
+    IplImage* imgBird;
+    //IplImage* imgCanny;
 
     // cvCreateImage
     imgOrigin = cvCreateImage(cvSize(RESIZE_WIDTH, RESIZE_HEIGHT), IPL_DEPTH_8U, 3);
-    imgCanny = cvCreateImage(cvGetSize(imgOrigin), IPL_DEPTH_8U, 1);
+    //imgCanny = cvCreateImage(cvGetSize(imgOrigin), IPL_DEPTH_8U, 1);
 
     while(1)
     {
@@ -898,20 +931,16 @@ void *ControlThread(void *unused)
         Frame2Ipl(imgOrigin); // save image to IplImage structure & resize image from 720x480 to 320x240
         pthread_mutex_unlock(&mutex);
 
-
-        cvCanny(imgOrigin, imgCanny, 100, 100, 3);
-
-        sprintf(fileName, "captureImage/imgCanny%d.png", i);
-        cvSaveImage(fileName , imgCanny, 0);
-
+        // cvCanny(imgOrigin, imgCanny, 100, 100, 3);
+        // sprintf(fileName, "captureImage/imgCanny%d.png", i);
+        // cvSaveImage(fileName , imgCanny, 0);
         //sprintf(fileName, "captureImage/imgOrigin%d.png", i);
         //cvSaveImage(fileName, imgOrigin, 0);
 
 
         // TODO : control steering angle based on captured image ---------------
-
-
-
+        sensor_Obstacle_Detection(1, 1500, 150); //Forward_Sensor_Obstacle_Detection
+        Bird_Eye_View(imgBird, imgOrigin);
         // ---------------------------------------------------------------------
 
         GetTime(&pt2);

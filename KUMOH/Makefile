@@ -10,13 +10,13 @@
 
 CC = gcc
 
-TARGETS = captureOpenCV
+TARGETS = KUMHOU
 
 OPT = -Os -O2
-CFLAGS   = $(OPT) -Wall -I. -I./utils `pkg-config opencv --cflags`
+CFLAGS   = $(OPT) -w -I. -I./utils `pkg-config opencv --cflags`
 CPPFLAGS = -I./include
 
-OBJS := captureOpenCV.o
+OBJS := main.o
 OBJS += nvthread.o
 
 LDLIBS :=
