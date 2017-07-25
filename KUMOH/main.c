@@ -31,25 +31,29 @@
 #define RESIZE_HEIGHT 240
 
 #define DRIVE 0
-#define STOP_FRONT_SENSOR 1
+#define STOP_WAIT_START_SIGNAL1 1 
+#define STOP_WAIT_START_SIGNAL2 2 
+#define STOP_FRONT_SENSOR 3
 
-//BirdView MACRO
+//LINE DETECTINON MACRO
 #define WINDOW_COUNT 15
 #define MARGIN 12
-#define WIDTH 240
-#define HEIGHT 180
+#define BIRD_WIDTH 240
+#define BIRD_HEIGHT 180
 #define MIN_PIXEL 50
 
-#define YM_PER_PIX 30/HEIGHT
-#define XM_PER_PIX 3.7/WIDTH
+#define YM_PER_PIX 30/BIRD_HEIGHT
+#define XM_PER_PIX 3.7/BIRD_WIDTH
 
 //OVERALL VARIABLES
 static char drive_status;
+static unsigned int img2bird[180][240][2];
 static NvMediaVideoSurface *capSurf = NULL;
 static NvBool stop = NVMEDIA_FALSE;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
+//OVERALL VARIABLES - LINE DETECTINON
 int LineX[100000];
 int LineY[100000];
 int LineIdx;
@@ -88,14 +92,17 @@ typedef struct {
     NvBool displayEnabled, fileDumpEnabled, timeNotCount;
 } CaptureContext;
 
-//Basic Driving Function(made by HyunSeok)
+//Basic Driving Function(coded by HyunSeok)
 static void start_setting(int velocity);
+static void Stop_wait_start_signal1(IplImage* imgYCrCb, IplImage* img_gray);
+static void Stop_wait_start_signal2();
 static void sensor_Obstacle_Detection(char sensor_number, int value, int velocity);
 
 //TODO : OTHERS
 static int nonZero(IplImage** imaBird,int top, int bottom , int left, int right);
+
 //TODO : Bird-Eye-View
-static void birdEyeView(IplImage** imgBird, IplImage* imgOrigin);
+static void birdEyeView(IplImage** imgBird, IplImage** imgOrigin);
 static void slidingWindow(IplImage** imgBird);
 static double polyFit(IplImage** imgBird);
 //TODO : RANSAC ALGORITHM, HOUGHLINE ALGORITHM
@@ -147,7 +154,8 @@ int main(int argc, char *argv[]){
     memset(&testArgs, 0, sizeof(TestArgs));
     if(!ParseOptions(argc, argv, &testArgs))
         return -1;
-    start_setting(150);
+    // Init Option
+    start_setting(0);
     printf("1. Create NvMedia capture \n");
     // Create NvMedia capture(s)
     switch (testArgs.vipDeviceInUse)
@@ -331,8 +339,6 @@ int main(int argc, char *argv[]){
     printf("9. Wait for completion \n");
     // Wait for completion
     NvSemaphoreDecrement(vipDoneSem, NV_TIMEOUT_INFINITE);
-
-
     err = 0;
 
 fail: // Run down sequence
@@ -391,18 +397,58 @@ fail: // Run down sequence
 }
 
 static void start_setting(int velocity){
-  CarControlInit();
-  SpeedControlOnOff_Write(CONTROL);
-  DesireSpeed_Write(velocity);
-  PositionControlOnOff_Write(CONTROL);
-  drive_status = DRIVE;
-  EncoderCounter_Write(0);
-  DesireEncoderCount_Write(300);
-  PositionControlOnOff_Write(UNCONTROL);
-  CameraYServoControl_Write(1700); 
+    int i, j;
+    double gap;
+    CarControlInit();
+    SpeedControlOnOff_Write(CONTROL);
+    DesireSpeed_Write(velocity);
+    drive_status = STOP_WAIT_START_SIGNAL1;
+    CameraYServoControl_Write(1570); 
+    CarLight_Write(FRONT_ON);
+    PositionControlOnOff_Write(CONTROL);
+    EncoderCounter_Write(0);
+    PositionControlOnOff_Write(UNCONTROL);
+    //BirdView Initialize
+	for (i = 0; i < 180; i++){
+		gap = (109. + 210. / 179. * i) / 240.;
+		int y = (int)(60. / 179. * i) + 70;
+		for (j = 0; j < 240; j++){
+            img2bird[i][j][0] = 120 - (int)(120./179. * i) + (int)(gap * j);
+            img2bird[i][j][1] = y;
+		}
+	}
 }
 
-void sensor_Obstacle_Detection(char sensor_number, int threshold, int velocity){
+static int init_count = 0;
+static void Stop_wait_start_signal1(IplImage* imgYCrCb, IplImage* img_gray){
+    cvInRangeS(imgYCrCb, cvScalar(0, 133, 77, 0), cvScalar(255, 173, 127, 0), img_gray);
+    unsigned j, k, num, count;
+    count = 0;
+    for(j = 0; j < RESIZE_HEIGHT; j++){
+        for(k = 0; k < RESIZE_WIDTH; k++){
+            if(img_gray->imageData[k + RESIZE_WIDTH * j] != 0){
+                count++;
+            }
+        }
+    }
+    if(init_count == 0) init_count = count;
+    if(init_count + 500 < count){
+        Alarm_Write(ON);
+        init_count = 0;
+        drive_status = STOP_WAIT_START_SIGNAL2;
+    }
+}
+
+static void Stop_wait_start_signal2(){
+    if(++init_count > 30){
+        init_count = 0;
+        drive_status = DRIVE;
+        Alarm_Write(ON);
+        DesireSpeed_Write(100);
+    }
+}
+
+static void sensor_Obstacle_Detection(char sensor_number, int threshold, int velocity){
     int data = DistanceSensor(sensor_number);
     if(data > threshold && drive_status==DRIVE){
         DesireSpeed_Write(0);
@@ -415,56 +461,59 @@ void sensor_Obstacle_Detection(char sensor_number, int threshold, int velocity){
 }
 
 static void Bird_Eye_View(IplImage** imgBird, IplImage** imgOrigin){
-    int hit[WIDTH] = { 0, };
+    int hit[BIRD_WIDTH] = { 0, };
 	int base[6] = { 0, };
 	int baseCount = 0;
-	int leftBase = 0;
-	int rightBase = 0;
+    //double intercept[2] = { 0, };
+    //int idxx = 0;
+    int i, j, x, y;
 
-	for (int i = 0; i < HEIGHT; i++) {
-		double gap = (109. + 210. / 179. * i) / 240.;
-		int y = (int)(60. / 179. * i) + 70;
-		uchar* ptr = (uchar*)(&(imgOrigin->imageData[y*320*3]));
+    uchar* ptr;
+    for (i = 0; i < BIRD_HEIGHT; i++){
+        y = img2bird[i][j][1];
+        ptr = (uchar*)((&(*imgOrigin))->imageData[y*320*3]));
+        
+        for (j = 0; j < 240; j++){
+            x = img2bird[i][j][0];
 
-		for (int j = 0; j < WIDTH; j++) {
-			int x = 120 - (int)(120. / 179. * i) + (int)(gap * j);
-			
-			if (ptr[x*3]>0&&ptr[x*3+1]>=155&&ptr[x*3+2]>=155) {
-				(*imgBird)->imageData[i * WIDTH + j] = 0;
+             if (ptr[x*3]>0&&ptr[x*3+1]>=155&&ptr[x*3+2]>=155) {
+				(*imgBird)->imageData[i * BIRD_WIDTH + j] = 0;
 			hit[j]++;
 			}
 			else
-			    (*imgBird)->imageData[i * WIDTH + j] = 255;
-			}
-     }
+			    (*imgBird)->imageData[i * BIRD_WIDTH + j] = 255;
+		}
+    }
 
-	for (int i = 0; i < WIDTH; i++) {
+    for (i = 0; i < BIRD_WIDTH; i++) {
 		while (hit[i]) {
 			if (30<hit[i]&&hit[base[baseCount]] < hit[i])base[baseCount] = i;
 			i++;
 		}
 		if (base[baseCount])baseCount++;
 	}
-	double intercept[2] = { 0, };
-	int idxx = 0;
-	for (int i = 0; i < baseCount; i++) {
+
+	
+	for (i = 0; i < baseCount; i++) {
 		slidingWindow(imgBird, base[i]);
 		double curves = polyFit(imgBird);
 		//intercept[idxx]= polyFit(&checkLine);
 		//printf("%d %f\n", i, intercept[idxx++]);
 		LineIdx = 0;
 	}
-	/*if (idxx == 2) {
+	
+    /*if (idxx == 2) {
 		double cal = (intercept[0] + intercept[1]) / 2;
-		//printf("%f\n", cal -((WIDTH*XM_PER_PIX)/2.0));
+		//printf("%f\n", cal -((BIRD_WIDTH*XM_PER_PIX)/2.0));
 	}*/
 }
 
 int nonZero(IplImage** imgBird, int top, int bottom, int left,int right) {
+    int i,j;
 	int tempIdx = 0;
-	for (int i = top; i < bottom; i++) {
-		for (int j = left; j < right; j++) {
-			if ((*imgBird)->imageData[i*WIDTH + j] == 0) {
+	for (i = top; i < bottom; i++) {
+		for (j = left; j < right; j++) {
+			if ((*imgBird)->imageData[i*BIRD_WIDTH + j] == 0) {
 				tempX[tempIdx] = j;
 				tempY[tempIdx++] = i;
 			}
@@ -474,11 +523,12 @@ int nonZero(IplImage** imgBird, int top, int bottom, int left,int right) {
 }
 
 void slidingWindow(IplImage** imgBird, int base) {
-	for (int i = 0; i < WINDOW_COUNT; i++) {
-		int top = HEIGHT - (HEIGHT / WINDOW_COUNT)*(i + 1);
-		int bottom = HEIGHT - (HEIGHT / WINDOW_COUNT)*i;
+    int i;
+	for (i = 0; i < WINDOW_COUNT; i++) {
+		int top = BIRD_HEIGHT - (BIRD_HEIGHT / WINDOW_COUNT)*(i + 1);
+		int bottom = BIRD_HEIGHT - (BIRD_HEIGHT / WINDOW_COUNT)*i;
 		int left = (base - MARGIN > 0) ? base - MARGIN : 0;
-		int right = (base + MARGIN < WIDTH) ? base + MARGIN : WIDTH;
+		int right = (base + MARGIN < BIRD_WIDTH) ? base + MARGIN : BIRD_WIDTH;
 
 		//printf("%d\n", base);
 
@@ -488,13 +538,13 @@ void slidingWindow(IplImage** imgBird, int base) {
 		int meanX = 0;
 
 		if (line > MIN_PIXEL) {
-			for (int i = 0; i < line; i++) {
+			for (i = 0; i < line; i++) {
 				meanX += tempX[i];
 			}
 			base = meanX / line;
 		}
 
-		for (int i = 0; i < line; i++) {
+		for (i = 0; i < line; i++) {
 			LineX[LineIdx] = tempX[i];
 			LineY[LineIdx++] = tempY[i];
 		}
@@ -505,7 +555,10 @@ double polyFit(IplImage** imgBird) {
 	int n = LineIdx;
 	double sxi = 0, sxi2 = 0, sxi3 = 0, sxi4 = 0, syi = 0, sxiyi = 0, sxi2yi = 0;
 	double a[3][3] = { 0, }, b[3] = { 0, }, c[3] = { 0, };
-	for (int i = 0; i < n; i++) {
+
+    int i,l,j;
+
+	for (i = 0; i < n; i++) {
 		//double x = LineX[i]*XM_PER_PIX;
 		//double y = LineY[i]*YM_PER_PIX;
 		double x = LineX[i];
@@ -517,7 +570,7 @@ double polyFit(IplImage** imgBird) {
 		syi += x;
 		sxiyi += y*x;
 		sxi2yi += y*y*x;
-		//checkLine->imageData[y * WIDTH + x] = 0;
+		//checkLine->imageData[y * BIRD_WIDTH + x] = 0;
 	}
 	a[0][0] = n;
 	a[0][1] = sxi;
@@ -533,19 +586,19 @@ double polyFit(IplImage** imgBird) {
 	b[1] = sxiyi; 
 	b[2] = sxi2yi;
 
-	for (int l = 0; l <= 1; l++) {
- 		for (int i = l + 1; i <= 2; i++) {
+	for (l = 0; l <= 1; l++) {
+ 		for (i = l + 1; i <= 2; i++) {
 			double temp = a[i][l] / a[l][l];
-			for (int j = l; j <= 2; j++) {
+			for (j = l; j <= 2; j++) {
  				a[i][j] = a[i][j] - temp*a[l][j];
 			}
 			b[i] = b[i] - temp*b[l];
 		}
 	}
 
-	for (int i = 2; i >= 0; i--) {
+	for (i = 2; i >= 0; i--) {
 		c[i] = b[i] / a[i][i];
-		for (int j = 0; j <= i - 1; j++) {
+		for (j = 0; j <= i - 1; j++) {
 			b[j] = b[j] - c[i] * a[j][i];
 			a[j][i] = 0;
 		}
@@ -553,9 +606,9 @@ double polyFit(IplImage** imgBird) {
 	int oldx=0;
 	int oldy=0;
 
-	for (int i = 0 ; i < 180; i++) {
+	for (i = 0 ; i < 180; i++) {
 		int y = c[0] + (c[1] * i) + (c[2] * (i*i));
-		if (0 < y&&y < WIDTH){
+		if (0 < y&&y < BIRD_WIDTH){
 			if (oldy == 0)oldy = y;
 			cvLine(*imgBird, cvPoint(oldy, i-1), cvPoint(y,i), CV_RGB(0, 0, 0), 2,8,0);
 			oldy = y;
@@ -565,13 +618,13 @@ double polyFit(IplImage** imgBird) {
 		}
 	}
 
-	double temp = 1 + (4 * c[2] * c[2] * HEIGHT*YM_PER_PIX) + (2 * c[2] * c[1] * HEIGHT) + (c[1] * c[1]);
+	double temp = 1 + (4 * c[2] * c[2] * BIRD_HEIGHT*YM_PER_PIX) + (2 * c[2] * c[1] * BIRD_HEIGHT) + (c[1] * c[1]);
 	temp = pow(temp, 1.5);
 	double curves = temp / fabs(2 * c[2]);
 	return curves;
 
-	/*double h = HEIGHT*YM_PER_PIX;
-	double w = WIDTH*XM_PER_PIX;
+	/*double h = BIRD_HEIGHT*YM_PER_PIX;
+	double w = BIRD_WIDTH*XM_PER_PIX;
 
 	double intercept = c[2] * h*h + c[1] * h + c[0];
 	return intercept;*/
@@ -735,20 +788,16 @@ static int ParseOptions(int argc, char *argv[], TestArgs *args){
         return 0;
     }
 
-
     if(args->vipAspectRatio == 0.0f)
         args->vipAspectRatio = 1.78f;
 
     if(!args->vipDisplayEnabled && !args->vipFileDumpEnabled)
         args->vipDisplayEnabled = NVMEDIA_TRUE;
 
-
     if(!args->vipCaptureTime && !args->vipCaptureCount)
         args->vipCaptureCount = 300;
     else if(args->vipCaptureTime && args->vipCaptureCount)
         args->vipCaptureTime = 0;
-
-
 
     return 1;
 }
@@ -871,19 +920,14 @@ static int Frame2Ipl(IplImage* img){
             g = y - 0.34455*(u-128) - 0.7169*(v-128);
             b = y + 1.779*(u-128);
 
-
             r = r>255? 255 : r<0 ? 0 : r;
             g = g>255? 255 : g<0 ? 0 : g;
             b = b>255? 255 : b<0 ? 0 : b;
-
 
             num = 3*k+3*resWidth*(j);
             img->imageData[num] = b;
             img->imageData[num+1] = g;
             img->imageData[num+2] = r;
-            //img->imageDataOrigin[num] = b;
-            //img->imageDataOrigin[num+1] = g;
-            //img->imageDataOrigin[num+2] = r;
         }
         stepY += pitchY[i];
         stepU += pitchU[i];
@@ -933,7 +977,7 @@ static unsigned int CaptureThread(void *params){
     {
         GetTime(&ct);
         ctime = (NvU64)ct.tv_sec * 1000000000LL + (NvU64)ct.tv_nsec;
-        printf("frame=%3d, time=%llu.%09llu[s] \n", i, (ctime-stime)/1000000000LL, (ctime-stime)%1000000000LL);
+        //printf("frame=%3d, time=%llu.%09llu[s] \n", i, (ctime-stime)/1000000000LL, (ctime-stime)%1000000000LL);
 
         pthread_mutex_lock(&mutex);            // for ControlThread()
 
@@ -1087,43 +1131,45 @@ void *ControlThread(void *unused){
     NvMediaTime pt1 ={0}, pt2 = {0};
     NvU64 ptime1, ptime2;
     struct timespec;
-
-    IplImage* imgOrigin;
-    IplImage* imgBird;
-    //IplImage* imgCanny;
-
+ 
     // cvCreateImage
-    imgOrigin = cvCreateImage(cvSize(RESIZE_WIDTH, RESIZE_HEIGHT), IPL_DEPTH_8U, 3);
-    //imgCanny = cvCreateImage(cvGetSize(imgOrigin), IPL_DEPTH_8U, 1);
+    IplImage* imgOrigin = cvCreateImage(cvSize(RESIZE_WIDTH, RESIZE_HEIGHT), IPL_DEPTH_8U, 3);
+    IplImage* imgYCrCb = cvCreateImage(cvSize(RESIZE_WIDTH, RESIZE_HEIGHT), IPL_DEPTH_8U, 3);
+    IplImage* img_gray = cvCreateImage(cvGetSize(imgOrigin), IPL_DEPTH_8U, 1);
+    IplImage* imgBird = cvCreateImage(cvSize(240,180), IPL_DEPTH_8U, 3);
+    imgBird->widthStep = 240 * 3;
 
     while(1)
     {
         pthread_mutex_lock(&mutex);
         pthread_cond_wait(&cond, &mutex);
 
-
         GetTime(&pt1);
         ptime1 = (NvU64)pt1.tv_sec * 1000000000LL + (NvU64)pt1.tv_nsec;
-
 
         Frame2Ipl(imgOrigin); // save image to IplImage structure & resize image from 720x480 to 320x240
         pthread_mutex_unlock(&mutex);
 
-        // cvCanny(imgOrigin, imgCanny, 100, 100, 3);
-        // sprintf(fileName, "captureImage/imgCanny%d.png", i);
-        // cvSaveImage(fileName , imgCanny, 0);
         sprintf(fileName, "captureImage/imgOrigin%d.png", i);
         cvSaveImage(fileName, imgOrigin, 0);
-
-
         // TODO : control steering angle based on captured image ---------------
-        sensor_Obstacle_Detection(1, 1500, 150); //Forward_Sensor_Obstacle_Detection
-        Bird_Eye_View(&imgBird, &imgOrigin);
+        if(drive_status == DRIVE){
+            //sensor_Obstacle_Detection(1, 1500, 150);
+            Bird_Eye_View(&imgBird, &imgOrigin);
+            // sprintf(fileName, "captureImage/imgBird%d.png", i);
+            // cvSaveImage(fileName, imgBird, 0);
+        }
+        else if(drive_status == STOP_WAIT_START_SIGNAL2){
+            Stop_wait_start_signal2();
+        }
+        else if(drive_status == STOP_WAIT_START_SIGNAL1){
+            cvCvtColor(imgOrigin, imgYCrCb, CV_BGR2YCrCb);
+            Stop_wait_start_signal1(imgYCrCb, img_gray);
+        }
         // ---------------------------------------------------------------------
-
-        GetTime(&pt2);
-        ptime2 = (NvU64)pt2.tv_sec * 1000000000LL + (NvU64)pt2.tv_nsec;
-        printf("--------------------------------operation time=%llu.%09llu[s]\n", (ptime2-ptime1)/1000000000LL, (ptime2-ptime1)%1000000000LL);
+        //GetTime(&pt2);
+        //ptime2 = (NvU64)pt2.tv_sec * 1000000000LL + (NvU64)pt2.tv_nsec;
+        //printf("--------------------------------operation time=%llu.%09llu[s]\n", (ptime2-ptime1)/1000000000LL, (ptime2-ptime1)%1000000000LL);
         i++;
     }
 }
