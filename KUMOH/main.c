@@ -33,12 +33,29 @@
 #define DRIVE 0
 #define STOP_FRONT_SENSOR 1
 
+//BirdView MACRO
+#define WINDOW_COUNT 15
+#define MARGIN 12
+#define WIDTH 240
+#define HEIGHT 180
+#define MIN_PIXEL 50
+
+#define YM_PER_PIX 30/HEIGHT
+#define XM_PER_PIX 3.7/WIDTH
+
 //OVERALL VARIABLES
 static char drive_status;
 static NvMediaVideoSurface *capSurf = NULL;
 static NvBool stop = NVMEDIA_FALSE;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int LineX[100000];
+int LineY[100000];
+int LineIdx;
+
+int tempX[1000];
+int tempY[1000];
 
 //DATA STRUCTURE
 typedef struct {
@@ -75,9 +92,12 @@ typedef struct {
 static void start_setting(int velocity);
 static void sensor_Obstacle_Detection(char sensor_number, int value, int velocity);
 
+//TODO : OTHERS
+static int nonZero(IplImage** imaBird,int top, int bottom , int left, int right);
 //TODO : Bird-Eye-View
-static void Bird_Eye_View(IplImage* imgBird, IplImage* imgOrigin);
-
+static void birdEyeView(IplImage** imgBird, IplImage* imgOrigin);
+static void slidingWindow(IplImage** imgBird);
+static double polyFit(IplImage** imgBird);
 //TODO : RANSAC ALGORITHM, HOUGHLINE ALGORITHM
 
 //TODO : Parking ALGORITHM
@@ -394,10 +414,168 @@ void sensor_Obstacle_Detection(char sensor_number, int threshold, int velocity){
     }
 }
 
-static void Bird_Eye_View(IplImage* imgBird, IplImage* imgOrigin){
-    
+static void Bird_Eye_View(IplImage** imgBird, IplImage** imgOrigin){
+    int hit[WIDTH] = { 0, };
+	int base[6] = { 0, };
+	int baseCount = 0;
+	int leftBase = 0;
+	int rightBase = 0;
+
+	for (int i = 0; i < HEIGHT; i++) {
+		double gap = (109. + 210. / 179. * i) / 240.;
+		int y = (int)(60. / 179. * i) + 70;
+		uchar* ptr = (uchar*)(&(imgOrigin->imageData[y*320*3]));
+
+		for (int j = 0; j < WIDTH; j++) {
+			int x = 120 - (int)(120. / 179. * i) + (int)(gap * j);
+			
+			if (ptr[x*3]>0&&ptr[x*3+1]>=155&&ptr[x*3+2]>=155) {
+				(*imgBird)->imageData[i * WIDTH + j] = 0;
+			hit[j]++;
+			}
+			else
+			    (*imgBird)->imageData[i * WIDTH + j] = 255;
+			}
+     }
+
+	for (int i = 0; i < WIDTH; i++) {
+		while (hit[i]) {
+			if (30<hit[i]&&hit[base[baseCount]] < hit[i])base[baseCount] = i;
+			i++;
+		}
+		if (base[baseCount])baseCount++;
+	}
+	double intercept[2] = { 0, };
+	int idxx = 0;
+	for (int i = 0; i < baseCount; i++) {
+		slidingWindow(imgBird, base[i]);
+		double curves = polyFit(imgBird);
+		//intercept[idxx]= polyFit(&checkLine);
+		//printf("%d %f\n", i, intercept[idxx++]);
+		LineIdx = 0;
+	}
+	/*if (idxx == 2) {
+		double cal = (intercept[0] + intercept[1]) / 2;
+		//printf("%f\n", cal -((WIDTH*XM_PER_PIX)/2.0));
+	}*/
 }
 
+int nonZero(IplImage** imgBird, int top, int bottom, int left,int right) {
+	int tempIdx = 0;
+	for (int i = top; i < bottom; i++) {
+		for (int j = left; j < right; j++) {
+			if ((*imgBird)->imageData[i*WIDTH + j] == 0) {
+				tempX[tempIdx] = j;
+				tempY[tempIdx++] = i;
+			}
+		}
+	}
+	return tempIdx;
+}
+
+void slidingWindow(IplImage** imgBird, int base) {
+	for (int i = 0; i < WINDOW_COUNT; i++) {
+		int top = HEIGHT - (HEIGHT / WINDOW_COUNT)*(i + 1);
+		int bottom = HEIGHT - (HEIGHT / WINDOW_COUNT)*i;
+		int left = (base - MARGIN > 0) ? base - MARGIN : 0;
+		int right = (base + MARGIN < WIDTH) ? base + MARGIN : WIDTH;
+
+		//printf("%d\n", base);
+
+		//cvRectangle(*imgBird, cvPoint(left, top), cvPoint(right, bottom), CV_RGB(0, 0, 0), 3, 0, 0);
+
+		int line = nonZero(imgBird, top, bottom, left, right);
+		int meanX = 0;
+
+		if (line > MIN_PIXEL) {
+			for (int i = 0; i < line; i++) {
+				meanX += tempX[i];
+			}
+			base = meanX / line;
+		}
+
+		for (int i = 0; i < line; i++) {
+			LineX[LineIdx] = tempX[i];
+			LineY[LineIdx++] = tempY[i];
+		}
+	}
+}
+
+double polyFit(IplImage** imgBird) {
+	int n = LineIdx;
+	double sxi = 0, sxi2 = 0, sxi3 = 0, sxi4 = 0, syi = 0, sxiyi = 0, sxi2yi = 0;
+	double a[3][3] = { 0, }, b[3] = { 0, }, c[3] = { 0, };
+	for (int i = 0; i < n; i++) {
+		//double x = LineX[i]*XM_PER_PIX;
+		//double y = LineY[i]*YM_PER_PIX;
+		double x = LineX[i];
+		double y = LineY[i];
+		sxi += y;
+		sxi2 += y*y;
+		sxi3 += y*y*y;
+		sxi4 += y*y*y*y;
+		syi += x;
+		sxiyi += y*x;
+		sxi2yi += y*y*x;
+		//checkLine->imageData[y * WIDTH + x] = 0;
+	}
+	a[0][0] = n;
+	a[0][1] = sxi;
+	a[0][2] = sxi2;
+	a[1][0] = sxi;
+	a[1][1] = sxi2;
+	a[1][2] = sxi3;
+	a[2][0] = sxi2;
+	a[2][1] = sxi3;
+	a[2][2] = sxi4;
+
+	b[0] = syi;
+	b[1] = sxiyi; 
+	b[2] = sxi2yi;
+
+	for (int l = 0; l <= 1; l++) {
+ 		for (int i = l + 1; i <= 2; i++) {
+			double temp = a[i][l] / a[l][l];
+			for (int j = l; j <= 2; j++) {
+ 				a[i][j] = a[i][j] - temp*a[l][j];
+			}
+			b[i] = b[i] - temp*b[l];
+		}
+	}
+
+	for (int i = 2; i >= 0; i--) {
+		c[i] = b[i] / a[i][i];
+		for (int j = 0; j <= i - 1; j++) {
+			b[j] = b[j] - c[i] * a[j][i];
+			a[j][i] = 0;
+		}
+	}
+	int oldx=0;
+	int oldy=0;
+
+	for (int i = 0 ; i < 180; i++) {
+		int y = c[0] + (c[1] * i) + (c[2] * (i*i));
+		if (0 < y&&y < WIDTH){
+			if (oldy == 0)oldy = y;
+			cvLine(*imgBird, cvPoint(oldy, i-1), cvPoint(y,i), CV_RGB(0, 0, 0), 2,8,0);
+			oldy = y;
+		}
+		else {
+			//printf("%d %d \n", i, y);
+		}
+	}
+
+	double temp = 1 + (4 * c[2] * c[2] * HEIGHT*YM_PER_PIX) + (2 * c[2] * c[1] * HEIGHT) + (c[1] * c[1]);
+	temp = pow(temp, 1.5);
+	double curves = temp / fabs(2 * c[2]);
+	return curves;
+
+	/*double h = HEIGHT*YM_PER_PIX;
+	double w = WIDTH*XM_PER_PIX;
+
+	double intercept = c[2] * h*h + c[1] * h + c[0];
+	return intercept;*/
+}
 
 static void SignalHandler(int signal){
     stop = NVMEDIA_TRUE;
@@ -940,7 +1118,7 @@ void *ControlThread(void *unused){
 
         // TODO : control steering angle based on captured image ---------------
         sensor_Obstacle_Detection(1, 1500, 150); //Forward_Sensor_Obstacle_Detection
-        Bird_Eye_View(imgBird, imgOrigin);
+        Bird_Eye_View(&imgBird, &imgOrigin);
         // ---------------------------------------------------------------------
 
         GetTime(&pt2);
