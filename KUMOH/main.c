@@ -37,7 +37,7 @@
 
 //LINE DETECTINON MACRO
 #define WINDOW_COUNT 15
-#define MARGIN 12
+#define MARGIN 25
 #define BIRD_WIDTH 240
 #define BIRD_HEIGHT 180
 #define MIN_PIXEL 50
@@ -52,14 +52,6 @@ static NvMediaVideoSurface *capSurf = NULL;
 static NvBool stop = NVMEDIA_FALSE;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-
-//OVERALL VARIABLES - LINE DETECTINON
-int LineX[100000];
-int LineY[100000];
-int LineIdx;
-
-int tempX[1000];
-int tempY[1000];
 
 //DATA STRUCTURE
 typedef struct {
@@ -99,12 +91,13 @@ static void Stop_wait_start_signal2();
 static void sensor_Obstacle_Detection(char sensor_number, int value, int velocity);
 
 //TODO : OTHERS
-static int nonZero(IplImage** imaBird,int top, int bottom , int left, int right);
+static int nonZero(IplImage** imgBird, int top, int bottom, int left, int right, int *tempX, int *tempY);
 
-//TODO : Bird-Eye-View
-static void birdEyeView(IplImage** imgBird, IplImage** imgOrigin);
-static void slidingWindow(IplImage** imgBird);
-static double polyFit(IplImage** imgBird);
+//TODO : Bird-Eye-View && LineDetection
+static int birdEyeView(IplImage** imgBird, IplImage** imgOrigin, int *base);
+static void lineDetection(IplImage** imgBird, IplImage** imgOrigin);
+static int slidingWindow(IplImage** imgBird, int base, int *lineX, int *lineY);
+static double polyFit(IplImage** imgBird, int *lineX, int *lineY,int lineIdx);
 //TODO : RANSAC ALGORITHM, HOUGHLINE ALGORITHM
 
 //TODO : Parking ALGORITHM
@@ -460,60 +453,13 @@ static void sensor_Obstacle_Detection(char sensor_number, int threshold, int vel
     }
 }
 
-static void Bird_Eye_View(IplImage** imgBird, IplImage** imgOrigin){
-    int hit[BIRD_WIDTH] = { 0, };
-	int base[6] = { 0, };
-	int baseCount = 0;
-    //double intercept[2] = { 0, };
-    //int idxx = 0;
-    int i, j, x, y;
-
-    uchar* ptr;
-    for (i = 0; i < BIRD_HEIGHT; i++){
-        y = img2bird[i][j][1];
-        ptr = (uchar*)((&(*imgOrigin))->imageData[y*320*3]));
-        
-        for (j = 0; j < 240; j++){
-            x = img2bird[i][j][0];
-
-             if (ptr[x*3]>0&&ptr[x*3+1]>=155&&ptr[x*3+2]>=155) {
-				(*imgBird)->imageData[i * BIRD_WIDTH + j] = 0;
-			hit[j]++;
-			}
-			else
-			    (*imgBird)->imageData[i * BIRD_WIDTH + j] = 255;
-		}
-    }
-
-    for (i = 0; i < BIRD_WIDTH; i++) {
-		while (hit[i]) {
-			if (30<hit[i]&&hit[base[baseCount]] < hit[i])base[baseCount] = i;
-			i++;
-		}
-		if (base[baseCount])baseCount++;
-	}
-
-	
-	for (i = 0; i < baseCount; i++) {
-		slidingWindow(imgBird, base[i]);
-		double curves = polyFit(imgBird);
-		//intercept[idxx]= polyFit(&checkLine);
-		//printf("%d %f\n", i, intercept[idxx++]);
-		LineIdx = 0;
-	}
-	
-    /*if (idxx == 2) {
-		double cal = (intercept[0] + intercept[1]) / 2;
-		//printf("%f\n", cal -((BIRD_WIDTH*XM_PER_PIX)/2.0));
-	}*/
-}
-
-int nonZero(IplImage** imgBird, int top, int bottom, int left,int right) {
-    int i,j;
+static int nonZero(IplImage** imgBird, int top, int bottom, int left, int right, int *tempX,int *tempY) {
+	int i, j;
 	int tempIdx = 0;
 	for (i = top; i < bottom; i++) {
 		for (j = left; j < right; j++) {
-			if ((*imgBird)->imageData[i*BIRD_WIDTH + j] == 0) {
+			if ((uchar)(*imgBird)->imageData[i* BIRD_WIDTH * 3 + j * 3] == 0) {
+				(uchar)(*imgBird)->imageData[i * 240 * 3 + j * 3 + 1] = 125;
 				tempX[tempIdx] = j;
 				tempY[tempIdx++] = i;
 			}
@@ -522,47 +468,90 @@ int nonZero(IplImage** imgBird, int top, int bottom, int left,int right) {
 	return tempIdx;
 }
 
-void slidingWindow(IplImage** imgBird, int base) {
-    int i;
-	for (i = 0; i < WINDOW_COUNT; i++) {
-		int top = BIRD_HEIGHT - (BIRD_HEIGHT / WINDOW_COUNT)*(i + 1);
-		int bottom = BIRD_HEIGHT - (BIRD_HEIGHT / WINDOW_COUNT)*i;
+static int birdEyeView(IplImage** imgBird, IplImage** imgOrigin,int *base) {
+	int hit[BIRD_WIDTH] = { 0, };
+	int i, j, x, y,baseCount=0;
+
+	for (i = 0; i < BIRD_HEIGHT; i++) {
+		for (j = 0; j < 240; j++) {
+			x = img2bird[i][j][0];
+			y = img2bird[i][j][1];
+			if ((uchar)(*imgOrigin)->imageData[y * 320 * 3 + x * 3 + 0] > 0 && (uchar)(*imgOrigin)->imageData[y * 320 * 3 + x * 3 + 1] >= 155 && (uchar)(*imgOrigin)->imageData[y * 320 * 3 + x * 3 + 2] >= 155) {
+				(uchar)(*imgBird)->imageData[i * 240 * 3 + j * 3+0] = 0;
+				(uchar)(*imgBird)->imageData[i * 240 * 3 + j * 3+1] = 0;
+				(uchar)(*imgBird)->imageData[i * 240 * 3 + j * 3+2] = 0;
+				hit[j]++;
+			}
+			else {
+				(uchar)(*imgBird)->imageData[i * 240 * 3 + j * 3 + 0] = 255;
+				(uchar)(*imgBird)->imageData[i * 240 * 3 + j * 3 + 1] = 255;
+				(uchar)(*imgBird)->imageData[i * 240 * 3 + j * 3 + 2] = 255;
+			}
+		}
+	}
+
+	for (i = 0; i < BIRD_WIDTH; i++) {
+		while (hit[i]&& i < BIRD_WIDTH) {
+			if (30<hit[i] && hit[base[baseCount]] < hit[i])
+				base[baseCount] = i;
+			i++;
+		} 
+		if (base[baseCount])baseCount++;
+	}
+
+	return baseCount;
+}
+
+static void lineDetection(IplImage** imgBird, IplImage** imgOrigin) {
+	int lineX[10000], lineY[10000], lineIdx;
+	int base[10] = { 0, };
+	int baseCount = birdEyeView(imgBird, imgOrigin,base);
+	int i;
+	for (i = 0; i < baseCount; i++) {
+		lineIdx = slidingWindow(imgBird, base[i],lineX,lineY);
+		polyFit(imgBird, lineX, lineY, lineIdx);
+	}
+}
+
+static int slidingWindow(IplImage** imgBird, int base,int *lineX, int *lineY) {
+	int tempX[1000],tempY[1000];
+	int i, j, lineIdx=0;
+	for (j = 0; j < WINDOW_COUNT; j++) {
+		int top = BIRD_HEIGHT - (BIRD_HEIGHT / WINDOW_COUNT)*(j + 1);
+		int bottom = BIRD_HEIGHT - (BIRD_HEIGHT / WINDOW_COUNT)*j;
 		int left = (base - MARGIN > 0) ? base - MARGIN : 0;
 		int right = (base + MARGIN < BIRD_WIDTH) ? base + MARGIN : BIRD_WIDTH;
 
-		//printf("%d\n", base);
-
-		//cvRectangle(*imgBird, cvPoint(left, top), cvPoint(right, bottom), CV_RGB(0, 0, 0), 3, 0, 0);
-
-		int line = nonZero(imgBird, top, bottom, left, right);
+		int line = nonZero(imgBird, top, bottom, left, right, tempX, tempY);
 		int meanX = 0;
+
+		cvRectangle(*imgBird, cvPoint(left, top), cvPoint(right, bottom), CV_RGB(0, 0, 122), 3, 0, 0);
 
 		if (line > MIN_PIXEL) {
 			for (i = 0; i < line; i++) {
 				meanX += tempX[i];
 			}
-			base = meanX / line;
+			base = (fmod(meanX, line) >= 0.5) ? meanX / line + 1 : meanX / line;
 		}
 
 		for (i = 0; i < line; i++) {
-			LineX[LineIdx] = tempX[i];
-			LineY[LineIdx++] = tempY[i];
+			lineX[lineIdx] = tempX[i];
+			lineY[lineIdx++] = tempY[i];
 		}
 	}
+	return lineIdx;
 }
 
-double polyFit(IplImage** imgBird) {
-	int n = LineIdx;
+double polyFit(IplImage** imgBird, int *lineX, int *lineY, int lineIdx) {
+	int n = lineIdx;
 	double sxi = 0, sxi2 = 0, sxi3 = 0, sxi4 = 0, syi = 0, sxiyi = 0, sxi2yi = 0;
 	double a[3][3] = { 0, }, b[3] = { 0, }, c[3] = { 0, };
 
-    int i,l,j;
+	int i, l, j;
 
 	for (i = 0; i < n; i++) {
-		//double x = LineX[i]*XM_PER_PIX;
-		//double y = LineY[i]*YM_PER_PIX;
-		double x = LineX[i];
-		double y = LineY[i];
+		double x = lineX[i];
+		double y = lineY[i];
 		sxi += y;
 		sxi2 += y*y;
 		sxi3 += y*y*y;
@@ -570,7 +559,6 @@ double polyFit(IplImage** imgBird) {
 		syi += x;
 		sxiyi += y*x;
 		sxi2yi += y*y*x;
-		//checkLine->imageData[y * BIRD_WIDTH + x] = 0;
 	}
 	a[0][0] = n;
 	a[0][1] = sxi;
@@ -583,14 +571,14 @@ double polyFit(IplImage** imgBird) {
 	a[2][2] = sxi4;
 
 	b[0] = syi;
-	b[1] = sxiyi; 
+	b[1] = sxiyi;
 	b[2] = sxi2yi;
 
 	for (l = 0; l <= 1; l++) {
- 		for (i = l + 1; i <= 2; i++) {
+		for (i = l + 1; i <= 2; i++) {
 			double temp = a[i][l] / a[l][l];
 			for (j = l; j <= 2; j++) {
- 				a[i][j] = a[i][j] - temp*a[l][j];
+				a[i][j] = a[i][j] - temp*a[l][j];
 			}
 			b[i] = b[i] - temp*b[l];
 		}
@@ -603,18 +591,15 @@ double polyFit(IplImage** imgBird) {
 			a[j][i] = 0;
 		}
 	}
-	int oldx=0;
-	int oldy=0;
+	int oldx = 0;
+	int oldy = 0;
 
-	for (i = 0 ; i < 180; i++) {
+	for (i = 0; i < 180; i++) {
 		int y = c[0] + (c[1] * i) + (c[2] * (i*i));
-		if (0 < y&&y < BIRD_WIDTH){
+		if (0 < y&&y < BIRD_WIDTH) {
 			if (oldy == 0)oldy = y;
-			cvLine(*imgBird, cvPoint(oldy, i-1), cvPoint(y,i), CV_RGB(0, 0, 0), 2,8,0);
+			cvLine(*imgBird, cvPoint(oldy, i - 1), cvPoint(y, i), CV_RGB(0, 0, 0), 2, 8, 0);
 			oldy = y;
-		}
-		else {
-			//printf("%d %d \n", i, y);
 		}
 	}
 
@@ -622,12 +607,6 @@ double polyFit(IplImage** imgBird) {
 	temp = pow(temp, 1.5);
 	double curves = temp / fabs(2 * c[2]);
 	return curves;
-
-	/*double h = BIRD_HEIGHT*YM_PER_PIX;
-	double w = BIRD_WIDTH*XM_PER_PIX;
-
-	double intercept = c[2] * h*h + c[1] * h + c[0];
-	return intercept;*/
 }
 
 static void SignalHandler(int signal){
@@ -1155,7 +1134,7 @@ void *ControlThread(void *unused){
         // TODO : control steering angle based on captured image ---------------
         if(drive_status == DRIVE){
             //sensor_Obstacle_Detection(1, 1500, 150);
-            Bird_Eye_View(&imgBird, &imgOrigin);
+            lineDetection(&imgBird, &imgOrigin);
             // sprintf(fileName, "captureImage/imgBird%d.png", i);
             // cvSaveImage(fileName, imgBird, 0);
         }
