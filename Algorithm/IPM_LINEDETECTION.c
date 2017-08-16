@@ -11,9 +11,10 @@
 #define PI 3.1415926
 
 static void InversePerspectiveMapping(IplImage* imgOrigin, IplImage* imgBird);
+static void BirdToLine(IplImage* imgBird, IplImage* imgGray);
 static void MatrixMultiply(float *a, float *b, float *result, int col1, int col2, int row2);
 static void lineDetection(IplImage* imgBird, IplImage* imgOrigin, IplImage* imgYUV);
-static int birdEyeView(IplImage* imgBird, IplImage* imgOrigin, IplImage* imgYUV, int *base);
+static int birdEyeView(IplImage* imgGray, int *base);
 static int slidingWindow(IplImage* imgGray, int base, int *lineX, int *lineY);
 static int nonZero(IplImage* imgGray, int top, int bottom, int left, int right, int *tempX, int *tempY);
 
@@ -43,12 +44,14 @@ int main() {
 		}
 
 		InversePerspectiveMapping(imgOrigin, imgBird);
+		cvCvtColor(imgBird, imgYUV, CV_BGR2YUV);
+		BirdToLine(imgYUV, imgGray);
 		lineDetection(imgBird, imgGray, imgYUV);
 		cvNamedWindow("Original", CV_WINDOW_AUTOSIZE);
 		cvNamedWindow("BirdView", CV_WINDOW_AUTOSIZE);
 		cvNamedWindow("BirdView_GRAY", CV_WINDOW_AUTOSIZE);
 		cvShowImage("Original", imgOrigin);
-		cvShowImage("BirdView", imgYUV);
+		cvShowImage("BirdView", imgBird);
 		cvShowImage("BirdView_GRAY", imgGray);
 		cvWaitKey(0);
 		cvDestroyWindow("Original");
@@ -60,8 +63,8 @@ int main() {
 static void InversePerspectiveMapping(IplImage* imgOrigin, IplImage* imgBird){
 	int frameWidth = 320;
 	int frameHeight = 240;
-	int alpha_ = 13, beta_ = 90, gamma_ = 90;
-	int f_ = 400, dist_ = 300;
+	int alpha_ = 20, beta_ = 90, gamma_ = 90;
+	int f_ = 300, dist_ = 400;
 	float focalLength, dist, alpha, beta, gamma;
 
 	alpha = (float)(((float)alpha_ - 90) * PI / 180);
@@ -129,10 +132,20 @@ static void MatrixMultiply(float *a, float *b, float *result, int col1, int col2
 		}
 	}
 }
+static void BirdToLine(IplImage* imgBird, IplImage* imgGray){
+	int i, j;
+	for (i = 0; i < 240; i++){
+		for (j = 0; j < 320; j++){
+			int now = (i * 320 + j) * 3;
+			if ((unsigned char)imgBird->imageData[now] > 150)
+			imgGray->imageData[now / 3] = 255;
+		}
+	}
+}
 static void lineDetection(IplImage* imgBird, IplImage* imgGray, IplImage* imgYUV) {
 	int lineX[10000], lineY[10000], lineIdx;
 	int base[10] = { 0, };
-	int baseCount = birdEyeView(imgGray, imgBird, imgYUV, base);
+	int baseCount = birdEyeView(imgGray, base);
 	int i;
 	/*for (i = 0; i < baseCount; i++) {
 	lineIdx = slidingWindow(imgBird, base[i],lineX,lineY);
@@ -153,19 +166,14 @@ static void lineDetection(IplImage* imgBird, IplImage* imgGray, IplImage* imgYUV
 		//}
 	}
 }
-static int birdEyeView(IplImage* imgGray, IplImage* imgBird, IplImage* imgYUV, int* base) {
+static int birdEyeView(IplImage* imgGray, int *base)
+{
 	int hit[320] = { 0, };
 	int i, j, baseCount = 0;
-	cvCvtColor(imgBird, imgYUV, CV_BGR2YUV);
+
 	for (i = 0; i < 240; i++) {
-		for (j = 0; j < 320; j++) {
-			if ((imgBird->imageData[(i * 320 + j) * 3 + 0] > 90) && (imgBird->imageData[(i * 320 + j) * 3 + 1] < 0) && (imgBird->imageData[(i * 320 + j) * 3 + 1] > -80)) {
-				imgGray->imageData[i * 320 + j] = 0;
-				hit[j]++;
-			}
-			else {
-				imgGray->imageData[i * 320 + j] = 255;
-			}
+		for (j = 0; j < 320; j++){
+			if(imgGray->imageData[i*320 + j] != 0) hit[j]++;
 		}
 	}
 
@@ -179,14 +187,13 @@ static int birdEyeView(IplImage* imgGray, IplImage* imgBird, IplImage* imgYUV, i
 	}
 	return baseCount;
 }
-
 static int nonZero(IplImage* imgGray, int top, int bottom, int left, int right, int *tempX, int *tempY) {
 	int i, j;
 	int tempIdx = 0;
 	for (i = top; i < bottom; i++) {
 		for (j = left; j < right; j++) {
-			if ((unsigned char)imgGray->imageData[i * 320 + j] == 0) {
-				(unsigned char)imgGray->imageData[i * 240 + j] = 125;
+			if ((unsigned char)imgGray->imageData[i * 320 + j] == 255) {
+				//(unsigned char)imgGray->imageData[i * 320 + j] = 128;
 				tempX[tempIdx] = j;
 				tempY[tempIdx++] = i;
 			}
