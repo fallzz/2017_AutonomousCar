@@ -459,32 +459,112 @@ int TWO_SENSOR_STATUS = 0;
 int SIX_SENSOR_STATUS = 0;
 int stacked_frame = 0;
 char PARKING_STATE = 0;
+int a=0,sum=0,i=0;
+int temp[200];
 
 static void Parking_Detect(){
 	int TWO_SENSOR_VALUE = DistanceSensor(2);
 	int SIX_SENSOR_VALUE = DistanceSensor(6);
+	printf("sensor value : %d\n",SIX_SENSOR_VALUE);
 	//Left Parking Detect
-	if(SIX_SENSOR_VALUE > 900 && SIX_SENSOR_STATUS == 0){
+	if(SIX_SENSOR_VALUE > 800 && SIX_SENSOR_STATUS == 0){
 		printf("sensor value : %d\n",SIX_SENSOR_VALUE);
 		SIX_SENSOR_STATUS = 1;
 		stacked_frame = 0;
 	}
-	else if(SIX_SENSOR_VALUE < 900 && SIX_SENSOR_STATUS == 1){
+	else if(SIX_SENSOR_VALUE < 800 && SIX_SENSOR_STATUS == 1){
 		printf("sensor value : %d\n",SIX_SENSOR_VALUE);
 		SIX_SENSOR_STATUS = 2;
-	}
-	else if(SIX_SENSOR_VALUE <= 900 && SIX_SENSOR_STATUS == 2){
+	}	
+	else if(SIX_SENSOR_VALUE <= 800 && SIX_SENSOR_STATUS == 2){
 		stacked_frame++;
 		printf("sensor value : %d\n",SIX_SENSOR_VALUE);
 		printf("stack frame : %d\n",stacked_frame);
 	}
-	else if(SIX_SENSOR_VALUE > 900 && SIX_SENSOR_STATUS == 2){
+	else if(SIX_SENSOR_VALUE > 800 && SIX_SENSOR_STATUS == 2){
 		if(stacked_frame >= 40){
 			SIX_SENSOR_STATUS = 0;
 		}
-		else if(stacked_frame < 20){
+		else if(stacked_frame < 23){
 			drive_status = LEFT_VERTICAL_PARKING;
 			printf("VERTICAL_PARKING\nstack frame : %d\n",stacked_frame);
+			/*
+			PositionControlOnOff_Write(100);
+			//EncoderCounter_Write(0);
+			DesireEncoderCount_Write(100);
+			while(1)
+			{
+				printf("DesireEncoderCount_Read() : %d\n",DesireEncoderCount_Read());
+				if(DesireEncoderCount_Read() == 0)
+					break;
+			}
+			PositionControlOnOff_Write(0);
+			DesireSpeed_Write(-100);
+			EncoderCounter_Write(0);
+			DesireEncoderCount_Write(100);
+			while(1)
+			{
+				if(DesireEncoderCount_Read() == 0)
+					break;
+			}
+			*/
+			/*
+			while(1)
+			{
+				DesireSpeed_Write(100);
+				SteeringServoControl_Write(1500);
+				SIX_SENSOR_VALUE = DistanceSensor(6);
+				if(i==100)
+					break;
+				else
+				{
+					temp[i]=SIX_SENSOR_VALUE;
+					i++;
+				}
+				//printf("i : %d\n",i);
+				//printf("sensor : %d\n",SIX_SENSOR_VALUE);
+				
+			}
+			while(1)
+			{
+				DesireSpeed_Write(-100);
+				SteeringServoControl_Write(1500);
+				SIX_SENSOR_VALUE = DistanceSensor(6);
+				if(i==200)
+					break;
+				else
+				{
+					temp[i]=SIX_SENSOR_VALUE;
+					i++;
+				}
+				//printf("i : %d\n",i);
+				//printf("sensor : %d\n",SIX_SENSOR_VALUE);
+			}
+			
+			for(i=0 ; i<200 ; i++)
+			{
+				sum+=temp[i];
+			}
+			SIX_SENSOR_VALUE=sum/200;
+
+			printf("sum : %d\n",SIX_SENSOR_VALUE);
+			*/
+			if(SIX_SENSOR_VALUE>800&&SIX_SENSOR_VALUE<=850)
+				a=6;
+			else if(SIX_SENSOR_VALUE>850&&SIX_SENSOR_VALUE<=900)
+				a=5;
+			else if(SIX_SENSOR_VALUE>900&&SIX_SENSOR_VALUE<=1000)
+				a=4;
+			else if(SIX_SENSOR_VALUE>1000&&SIX_SENSOR_VALUE<=1100)
+				a=3;
+			else if(SIX_SENSOR_VALUE>1100&&SIX_SENSOR_VALUE<=1200)
+				a=2;
+			else if(SIX_SENSOR_VALUE>1200&&SIX_SENSOR_VALUE<=1300)
+				a=1;
+			else
+				a=0;
+			printf("a : %d\n",a);
+			
 			TWO_SENSOR_STATUS = 0;
 		}
 		else if(stacked_frame < 40){
@@ -529,32 +609,40 @@ static void Left_Vertical_Parking(){
 	int FOUR_SENSOR_VALUE = DistanceSensor(4);
 	if(PARKING_STATE == 0){
 		if(stacked_frame == 0){
-			DesireSpeed_Write(100);
+			DesireSpeed_Write(110);
 			SteeringServoControl_Write(1000); // right
 		}
-		else if(stacked_frame == 18){
+		else if(stacked_frame == 22+a){ // 18 -> 24
 			DesireSpeed_Write(-100);
 			SteeringServoControl_Write(1500); // center
 		}
-		else if(stacked_frame == 32){
-			SteeringServoControl_Write(2000); // reft
+		else if(stacked_frame == 32+a){
+			SteeringServoControl_Write(2000); // left
 		}
-		else if(stacked_frame == 40){
+		else if(stacked_frame == 42+a){
 			SteeringServoControl_Write(1500); // center
 		}
-		else if(stacked_frame > 40 && FOUR_SENSOR_VALUE > 2000){
-			DesireSpeed_Write(DRIVE_VELOCITY);
+		else if(stacked_frame > 42 && FOUR_SENSOR_VALUE > 2000){
+			DesireSpeed_Write(0);
+			sleep(1);
+			CarLight_Write(ALL_OFF);
+			EncoderCounter_Write(0);
+			DesireSpeed_Write(0);
 			Alarm_Write(ON);
+			usleep(1000000);
+			Alarm_Write(OFF);
+			usleep(1000000);
+			DesireSpeed_Write(DRIVE_VELOCITY);
 			PARKING_STATE = 1;
 			stacked_frame = 0;
 		}
 		stacked_frame++;
 	}
 	else{
-		if(stacked_frame == 11){
+		if(stacked_frame == 11+a){
 			SteeringServoControl_Write(2000);
 		}
-		else if(stacked_frame == 50){
+		else if(stacked_frame == 50+a){
 			stacked_frame = -1;
 			SteeringServoControl_Write(1500);
 			drive_status = DRIVE;
@@ -590,24 +678,32 @@ static void Left_Horizontal_Parking(){
 	}
 	else if (PARKING_STATE == 1){
 		if(FOUR_SENSOR_VALUE > 2000){
+			DesireSpeed_Write(0);
+			sleep(1);
+			CarLight_Write(ALL_OFF);
+			EncoderCounter_Write(0);
+			DesireSpeed_Write(0);
+			Alarm_Write(ON);
+			usleep(1000000);
+			Alarm_Write(OFF);
+			usleep(1000000);
 			PARKING_STATE = 3;
 			stacked_frame = 0;
-			Alarm_Write(ON);
 			DesireSpeed_Write(DRIVE_VELOCITY);
 			SteeringServoControl_Write(1000);
 		}
 	}
 	else{
-		if(stacked_frame++ == 15){
+		if(stacked_frame++ == 15+a){
 			SteeringServoControl_Write(1500);
 		}
-		else if(stacked_frame == 35){
+		else if(stacked_frame == 35+a){
 			SteeringServoControl_Write(2000);
 		}
-		else if(stacked_frame == 55){
+		else if(stacked_frame == 55+a){
 			SteeringServoControl_Write(1500);
 		}
-		else if(stacked_frame == 100){
+		else if(stacked_frame == 100+a){
 			stacked_frame = 0;
 			drive_status = DRIVE;
 			SIX_SENSOR_STATUS = 0;
