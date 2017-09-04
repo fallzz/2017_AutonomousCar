@@ -11,7 +11,7 @@ int main() {
 	IplImage* imgLine = cvCreateImage(cvSize(320, 240), IPL_DEPTH_8U, 1);
 	IplImage* imgBird = cvCreateImage(cvSize(320, 240), IPL_DEPTH_8U, 1);
 	for (int q = 27; q < 70; q++) {
-		sprintf(fileName, "image/imgOrigin%d.png", q);
+		sprintf(fileName, "../../curveImage/imgOrigin%d.png", q);
 		imgOrigin = cvLoadImage(fileName, CV_LOAD_IMAGE_UNCHANGED);
 		//LINE DETECTION BASED ON COLOR(HSV-MODEL)
 		cvSmooth(imgOrigin, imgOriginBlur, CV_GAUSSIAN, 3, 3, 0., 0.);
